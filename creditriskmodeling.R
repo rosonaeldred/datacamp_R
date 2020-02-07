@@ -505,3 +505,154 @@ acc_undersample <- sum(diag(confmat_undersample)) / nrow(test_set)
 acc_prior <-sum(diag(confmat_prior))/ nrow(test_set)
 acc_loss_matrix <-sum(diag(confmat_loss_matrix))/ nrow(test_set)
 acc_weights <-sum(diag(confmat_weights))/ nrow(test_set)
+
+
+##############################
+# CH4 Evaluating a credit risk model, S1 Finding the right cut-off: the strategy curve
+##############################
+
+#predictions_all_full
+cutoff <- quantile(predictions_all_full,0.8)
+pred_full_20 <- ifelse(predictions_all_full >cutoff, 1,0)
+
+true_and_predval <-cbind(test_set$loan_status, pred_full_20)
+accepted_loans <- true_and_predval[pred_full_20==0,1]
+bad_rate <-sum(accepted_loans)/length(accepted_loans)
+
+
+######################### 
+# Exercises Ch4 Sec 1 :cut-off: the strategy curve
+
+#####(Computing a bad rate given a fixed acceptance rate)
+
+# Make predictions for the probability of default using the pruned tree and the test set.
+prob_default_prior <- predict(ptree_prior, newdata = test_set)[ ,2]
+# ,2 so that we have the relevant predictions
+
+# Obtain the cutoff for acceptance rate 80%
+cutoff_prior <- quantile(prob_default_prior,0.8)  
+
+# Obtain the binary predictions.
+bin_pred_prior_80 <- ifelse(prob_default_prior > cutoff_prior, 1, 0)
+
+# Obtain the actual default status for the accepted loans
+accepted_status_prior_80 <- test_set$loan_status[bin_pred_prior_80 == 0]
+
+# Obtain the bad rate for the accepted loans
+sum(accepted_status_prior_80)/length(accepted_status_prior_80)
+
+##### Strategy table and strategy curve
+ strategy_bank <-function(prob_of_def){
+  cutoff=rep(NA, 21)
+  bad_rate=rep(NA, 21)
+  accept_rate=seq(1,0,by=-0.05)
+  for (i in 1:21){
+    cutoff[i]=quantile(prob_of_def,accept_rate[i])
+    pred_i=ifelse(prob_of_def> cutoff[i], 1, 0)
+    pred_as_good=test_set$loan_status[pred_i==0]
+    bad_rate[i]=sum(pred_as_good)/length(pred_as_good)}
+  table=cbind(accept_rate,cutoff=round(cutoff,4),bad_rate=round(bad_rate,4))
+  return(list(table=table,bad_rate=bad_rate, accept_rate=accept_rate, cutoff=cutoff))
+ }
+
+ # Have a look at the function strategy_bank
+ strategy_bank
+ 
+ # Apply the function strategy_bank to both predictions_cloglog and predictions_loss_matrix
+ 
+ strategy_cloglog <- strategy_bank(predictions_cloglog)
+ strategy_loss_matrix <- strategy_bank(predictions_loss_matrix)
+ 
+ # Obtain the strategy tables for both prediction-vectors
+ strategy_cloglog$table
+ strategy_loss_matrix$table
+ 
+ # Plot the strategy functions
+ par(mfrow = c(1,2))
+ plot(strategy_cloglog$accept_rate, strategy_cloglog$bad_rate, 
+      type = "l", xlab = "Acceptance rate", ylab = "Bad rate", 
+      lwd = 2, main = "logistic regression")
+ 
+ plot(strategy_loss_matrix$accept_rate, strategy_loss_matrix$bad_rate, 
+      type = "l", xlab = "Acceptance rate", 
+      ylab = "Bad rate", lwd = 2, main = "tree")
+  
+ 
+ ######################### 
+ # Exercises Ch4 Sec 2 ROC Curve
+library(pROC)
+ 
+ # Construct the objects containing ROC-information
+ ROC_logit <- roc(test_set$loan_status, predictions_logit)
+ ROC_probit <- roc(test_set$loan_status, predictions_probit)
+ ROC_cloglog <-roc(test_set$loan_status, predictions_cloglog)
+ ROC_all_full <- roc(test_set$loan_status, predictions_all_full)
+ 
+ # Draw all ROCs on one plot
+ plot(ROC_logit)
+ lines(ROC_probit, col="blue")
+ lines(ROC_cloglog, col="red")
+ lines(ROC_all_full, col="green")
+ 
+ ##### ROC-curves for comparison of tree-based models
+ 
+ 
+ ##############################
+ # CH4 Sec 3 Input selection based on AUC
+ ##############################
+ ##### AUC-based pruning 
+ 
+ #1. Start with full model, including all vars (in our case, 7), compute AUC 
+AUC_model_full <-auc(test_set$loan_status, predictions_all_full)
+ 
+ #2. build 7 new models, each with one var removed
+ 
+log_1_remove_amnt <- glm(loan_status ~ grade + home_ownership +annual_inc+age + emp_cat + ir_cat, family="binomial", data=training_set)
+log_1_remove_grade <- glm(loan_status ~ loan_amnt + home_ownership +annual_inc+age + emp_cat + ir_cat, family="binomial", data=training_set)
+log_1_remove_home <- glm(loan_status ~ loan_amnt + grade +annual_inc+age + emp_cat + ir_cat, family="binomial", data=training_set)
+#etc 
+
+pred_1_remove_amnt<-predict(log_1_remove_amnt, newdata=test_set, type="response")
+pred_1_remove_grade<-predict(log_1_remove_grade, newdata=test_set, type="response")
+pred_1_remove_home<-predict(log_1_remove_home, newdata=test_set, type="response")
+
+
+######################### 
+# Exercises Ch4 Sec 3 AUC pruning 
+
+# Build four models each time deleting one variable in log_3_remove_ir
+log_4_remove_amnt <- glm(loan_status ~ grade + annual_inc + emp_cat, family = binomial, data = training_set) 
+log_4_remove_grade <-glm(loan_status ~ loan_amnt + annual_inc + emp_cat, family = binomial, data = training_set) 
+log_4_remove_inc <- glm(loan_status ~ loan_amnt + grade  + emp_cat, family = binomial, data = training_set) 
+log_4_remove_emp <-glm(loan_status ~ loan_amnt + grade  + annual_inc, family = binomial, data = training_set)
+
+
+# Make PD-predictions for each of the models
+pred_4_remove_amnt <- predict(log_4_remove_amnt, newdata = test_set, type = "response")
+pred_4_remove_grade <- predict(log_4_remove_grade, newdata = test_set, type = "response")
+pred_4_remove_inc <-predict(log_4_remove_inc, newdata = test_set, type = "response")
+pred_4_remove_emp <- predict(log_4_remove_emp, newdata = test_set, type = "response")
+
+# Compute the AUCs
+auc(test_set$loan_status,pred_4_remove_amnt)
+auc(test_set$loan_status,pred_4_remove_grade)
+auc(test_set$loan_status,pred_4_remove_inc)
+auc(test_set$loan_status,pred_4_remove_emp)
+
+
+#####Further model reduction?
+log_4_remove_amnt <- glm(loan_status ~ grade + annual_inc + emp_cat, family = binomial, data = training_set) 
+
+
+# Build three models each time deleting one variable in log_4_remove_amnt
+log_5_remove_grade <- glm(loan_status ~ annual_inc + emp_cat, family = binomial, data = training_set) 
+log_5_remove_inc <- glm(loan_status ~ grade +  emp_cat, family = binomial, data = training_set) 
+log_5_remove_emp <- glm(loan_status ~ grade + annual_inc, family = binomial, data = training_set) 
+
+# Make PD-predictions for each of the models
+pred_5_remove_grade <- predict(log_5_remove_grade, newdata = test_set, type = "response")
+pred_5_remove_inc <-predict(log_5_remove_inc, newdata = test_set, type = "response")
+pred_5_remove_emp <-predict(log_5_remove_emp, newdata = test_set, type = "response")
+
+# Plot the ROC-curve for the best model here
+plot(roc(test_set$loan_status, pred_4_remove_amnt))
